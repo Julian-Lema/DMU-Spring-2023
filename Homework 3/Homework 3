@@ -1,0 +1,151 @@
+using DMUStudent.HW3: HW3, DenseGridWorld, visualize_tree
+using POMDPs: actions, @gen, isterminal, discount, statetype, actiontype, simulate, states, initialstate
+using D3Trees: inchrome
+using StaticArrays: SA
+using Statistics: mean, std, mean
+
+############
+# Question 3
+############
+
+function heuristic_policy(s)
+    xtrue = s[1]
+    ytrue = s[2]
+    
+    x = mod(s[1],20)
+    y = mod(s[2],20)
+    
+    # If between bounds
+    if (20 - x > 10) & (20 - x != 20) 
+        a = :left
+    elseif (20 - x <= 10) & (20 - x != 0)
+        a = :right
+    elseif 20 - y > 10
+        a = :down
+    else 
+        a = :up
+    end
+    
+#     # If outside of internal square 
+#     if 60 - xtrue > 40 
+#         a = :right
+#     elseif 60 - xtrue < 20
+#         a = :left 
+#     elseif 60 - ytrue > 40
+#         a = :up
+#     elseif 60 - ytrue < 20
+#         a = :down
+#     else
+#         return a
+#     end
+    
+    return a 
+end
+
+
+##########################################
+function rollout_smart(mdp, start_state, heuristic_policy, max_steps=100)
+    r_total = 0.0
+    a = actions(mdp)
+    s = start_state
+    t = 0
+    while !isterminal(mdp, s) && t < max_steps
+        a = heuristic_policy(s)
+        s, r = @gen(:sp,:r)(mdp, s, a)
+        r_total += discount(mdp)^t*r
+        t += 1
+    end
+    return r_total # replace this with the reward
+end
+##########################################
+function bonus(N, Ns, s, a)
+    
+    if N[(s,a)] == 0 || Ns == 0
+        return Inf
+    end    
+    
+    return sqrt(log(Ns)/N[(s,a)])  
+end
+
+
+##########################################
+
+function explore(mdp,N,s,Q,c)
+    A = actions(mdp)
+    Ns = sum(N[(s,a)] for a in A)
+    
+    index = argmax(Q[(s,a)] + c * bonus(N,Ns,s,a) for a in A)
+    return A[index] 
+end
+
+##########################################
+function simulateMCTS(mdp,s,N,Q,d,c,V,T,discount)
+    A = actions(mdp)
+    
+    if d <= 0 
+        return rollout_smart(mdp, s, heuristic_policy), N, T, Q
+    end
+    
+    
+    if !haskey(N, (s,first(A)) )
+
+        for a in A
+            N[s,a] = 0
+            Q[s,a] = 0
+        end
+        return rollout_smart(mdp, s, heuristic_policy), N, T, Q
+    end
+    
+    a = explore(mdp,N,s,Q,c)
+    sprime , r = @gen(:sp,:r)(mdp,s,a)
+    
+    if !haskey(T, (s,a,sprime) )
+        T[s,a,sprime] = 0
+    end
+    
+    T[(s,a,sprime)] += 1
+    
+    q, N, T, Q = simulateMCTS(mdp,sprime,N,Q,d-1,c,V,T,discount)         
+    q = r + discount * q
+    
+    N[s,a] += 1
+    Q[s,a] += (q - Q[(s,a)]) / N[(s,a)]
+    return q, N, T, Q
+    
+end
+
+        
+##########################################
+function MCTS(mdp, reps)
+    s = SA[19,19]
+    dis = discount(mdp)
+    d = 15
+    c = 120
+    V = 0
+    S = statetype(mdp)
+    A = actiontype(mdp)
+    N = Dict{Tuple{S, A}, Int}()
+    Q = Dict{Tuple{S, A}, Float64}()
+    T = Dict{Tuple{S, A, S}, Int}()
+    A = actions(mdp)
+    
+    
+    
+    for i in 1:reps 
+        q, N, T, Q = simulateMCTS(mdp,s,N,Q,d,c,V,T,dis)
+    end
+    
+
+    index = argmax(Q[s,a] for a in actions(mdp))
+        
+    return Q, N, T, A[index]
+
+end
+
+mdp = DenseGridWorld(seed=4)
+
+Q,N,T,A = MCTS(mdp, 7)
+
+
+
+inchrome(visualize_tree(Q, N, T, SA[19,19]))
